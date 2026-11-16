@@ -1,4 +1,6 @@
 import io
+import os
+from unittest.mock import patch
 import unittest
 
 import numpy as np
@@ -28,7 +30,8 @@ class ApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client_context = TestClient(app)
-        cls.client = cls.client_context.__enter__()
+        with patch.dict(os.environ, {'DEEPSEEK_API_KEY': ''}):
+            cls.client = cls.client_context.__enter__()
 
     @classmethod
     def tearDownClass(cls):
@@ -43,6 +46,14 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json()['detections'], [])
         self.assertEqual(self.client.get('/health').status_code, 200)
         self.assertEqual(self.client.get('/').status_code, 200)
+
+    def test_analyze_without_key(self):
+        buf = io.BytesIO()
+        Image.new('RGB', (32, 32), 'white').save(buf, format='JPEG')
+        response = self.client.post('/analyze', content=buf.getvalue())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['guidance']['status'], 'unavailable')
+        self.assertIn('detections', response.json())
 
     def test_bad_image(self):
         self.assertEqual(self.client.post('/detect', content=b'invalid').status_code, 400)

@@ -11,9 +11,13 @@ import onnxruntime as ort
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
+from dotenv import load_dotenv
+
+from mobile_demo.guidance import DeepSeekGuide
 from starlette.concurrency import run_in_threadpool
 
 ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / '.env')
 MAX_BYTES = 5 * 1024 * 1024
 Image.MAX_IMAGE_PIXELS = 16_000_000
 
@@ -71,27 +75,32 @@ class Detector:
         self.names = ast.literal_eval(metadata.get('names', '{}'))
         self.lock = threading.Lock()
 
-    def predict(self, data):
-        try:
-            with Image.open(io.BytesIO(data)) as source:
-                image = ImageOps.exif_transpose(source).convert('RGB')
-        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
-            raise HTTPException(400, '请上传有效且尺寸适中的图片') from exc
+    def predict_image(self, image):
         tensor, scale, left, top = prepare(image, self.size)
         with self.lock:
             output = self.session.run(None, {self.input.name: tensor})[0]
-        return {'width': image.width, 'height': image.height,
+        return {'width': image.width, 'height': image.height, 'backend': 'yolo',
                 'detections': decode(output, scale, left, top, image.width,
                                      image.height, self.names)}
 
 
+def read_image(data):
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            return ImageOps.exif_transpose(source).convert('RGB')
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise HTTPException(400, '请上传有效且尺寸适中的图片') from exc
+
+
 @asynccontextmanager
 async def lifespan(app):
+    app.state.backend = 'yolo'
+    app.state.guide = DeepSeekGuide()
     app.state.detector = Detector()
     yield
 
 
-app = FastAPI(title='探步 · 手机可行性测试', lifespan=lifespan)
+app = FastAPI(title='探步 · YOLO + DeepSeek 手机测试', lifespan=lifespan)
 
 
 @app.get('/')
@@ -100,15 +109,35 @@ def index():
 
 
 @app.get('/health')
-def health():
-    return {'status': 'ok', 'model': 'yolov8n.onnx', 'runtime': 'ONNX Runtime CPU'}
+def health(request: Request):
+    state = request.app.state
+    return {'status': 'ok', 'backend': 'yolo', 'model': 'yolov8n.onnx',
+            'runtime': 'ONNX Runtime CPU', 'guidance_model': state.guide.model,
+            'guidance_configured': bool(state.guide.key)}
 
 
-@app.post('/detect')
-async def detect(request: Request):
+async def predict_request(request):
     data = bytearray()
     async for chunk in request.stream():
         data.extend(chunk)
         if len(data) > MAX_BYTES:
             raise HTTPException(413, '图片不能超过 5 MB')
-    return await run_in_threadpool(request.app.state.detector.predict, bytes(data))
+    image = await run_in_threadpool(read_image, bytes(data))
+    try:
+        return await run_in_threadpool(request.app.state.detector.predict_image, image)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, '视觉推理失败，请检查模型路径和运行环境') from exc
+
+
+@app.post('/detect')
+async def detect(request: Request):
+    return await predict_request(request)
+
+
+@app.post('/analyze')
+async def analyze(request: Request):
+    result = await predict_request(request)
+    result['guidance'] = await request.app.state.guide.describe(result)
+    return result

@@ -5,16 +5,18 @@
 body{font:16px system-ui;margin:0;background:#101923;color:#eef4ff;padding:20px;max-width:760px;margin:auto}h1{font-size:26px}p{line-height:1.6;color:#c6d6e8}button,label{display:inline-block;background:#83edcc;color:#08281f;border:0;padding:13px 17px;border-radius:10px;font:inherit;margin:5px 3px;cursor:pointer}button:disabled{opacity:.4}.stage{position:relative;margin-top:20px}video,canvas{width:100%;border-radius:12px}video{display:none}#status{min-height:48px}input{display:none}li{margin:8px}small{color:#c6d6e8}
 </style>
 <h1>探步 · 手机摄像头测试</h1>
-<p>使用 YOLOv8n 识别常见物体。画面会传到运行本服务的电脑进行推理。本页面用于技术测试，不能用于实际出行避障。</p>
+<p>使用 YOLOv8n 识别物体；点击“生成场景说明”后，由 DeepSeek V4.1 Flash 解释检测摘要。画面传到本服务电脑，只有类别、分数和框坐标发送给 DeepSeek。本页面用于技术测试，不能用于实际出行避障。</p>
 <button id="start">开启后置摄像头</button><button id="stop" disabled>停止</button>
 <label>拍照或选择图片<input id="file" type="file" accept="image/*" capture="environment"></label>
+<button id="guide" disabled>生成场景说明</button>
+<p id="guidance" role="status" aria-live="polite">AI 说明仅供测试；生成时暂停采集，说明对应当次静止画面。</p>
 <p id="status" role="status" aria-live="polite">点击开启并允许相机权限，或上传图片测试。</p>
 <div class="stage"><video id="video" autoplay muted playsinline></video><canvas id="view"></canvas></div>
 <ul id="results"></ul><small>显示模型原始英文类别；检测框不代表距离或危险程度。</small>
 <script>
 const $=id=>document.getElementById(id),video=$('video'),view=$('view'),ctx=view.getContext('2d');
-let stream=null,running=false,timer=null,epoch=0;
-function stop(){running=false;epoch++;clearTimeout(timer);stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;$('start').disabled=false;$('stop').disabled=true;}
+let stream=null,running=false,timer=null,epoch=0,lastFrame=null;
+function stop(){running=false;epoch++;clearTimeout(timer);stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;$('start').disabled=false;$('stop').disabled=true;$('guide').disabled=!lastFrame;}
 async function detect(source,token){
  const canvas=document.createElement('canvas');
  const w=source.videoWidth||source.naturalWidth,h=source.videoHeight||source.naturalHeight;
@@ -23,18 +25,27 @@ async function detect(source,token){
  const start=performance.now();const response=await fetch('/detect',{method:'POST',headers:{'Content-Type':'image/jpeg'},body:blob});
  if(!response.ok)throw new Error(`检测失败 (${response.status})`);
  const data=await response.json();if(token!==epoch)return;
+ lastFrame=blob;$('guide').disabled=false;$('guidance').textContent='可生成此画面的场景说明；识别结果不代表完整环境。';
  view.width=canvas.width;view.height=canvas.height;ctx.drawImage(canvas,0,0);ctx.lineWidth=3;ctx.strokeStyle='#83edcc';ctx.font='16px system-ui';
  $('results').replaceChildren();
  for(const item of data.detections){const [x,y,x2,y2]=item.box;ctx.strokeRect(x,y,x2-x,y2-y);ctx.fillStyle='#83edcc';ctx.fillText(`${item.label} ${Math.round(item.confidence*100)}%`,Math.max(0,x),Math.max(18,y-5));const li=document.createElement('li');li.textContent=`${item.label} · ${Math.round(item.confidence*100)}%`;$('results').append(li);}
  $('status').textContent=`检测到 ${data.detections.length} 个物体 · ${Math.round(performance.now()-start)} ms`;
 }
 async function loop(token){if(!running||token!==epoch)return;try{await detect(video,token);}catch(e){if(token===epoch){stop();$('status').textContent=e.message;}}if(running&&token===epoch)timer=setTimeout(()=>loop(token),700);}
-$('start').onclick=async()=>{stop();const token=epoch;$('start').disabled=true;try{
+$('start').onclick=async()=>{stop();lastFrame=null;$('guide').disabled=true;const token=epoch;$('start').disabled=true;try{
  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw new Error('手机相机需要受信任的 HTTPS。请按 README 配置 HTTPS；也可使用拍照/图片上传。');
  const next=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
  if(token!==epoch){next.getTracks().forEach(t=>t.stop());return;}stream=next;video.srcObject=stream;await video.play();running=true;$('stop').disabled=false;loop(token);
  }catch(e){if(token===epoch){stop();$('status').textContent=e.message;}}};
 $('stop').onclick=()=>{stop();$('status').textContent='摄像头已停止';};
-$('file').onchange=async e=>{stop();const file=e.target.files[0];if(!file)return;const token=epoch;const url=URL.createObjectURL(file);try{const image=new Image();image.src=url;await image.decode();$('status').textContent='正在识别图片…';await detect(image,token);}catch(err){$('status').textContent=err.message;}finally{URL.revokeObjectURL(url);e.target.value='';}};
+$('file').onchange=async e=>{stop();lastFrame=null;$('guide').disabled=true;const file=e.target.files[0];if(!file)return;const token=epoch;const url=URL.createObjectURL(file);try{const image=new Image();image.src=url;await image.decode();$('status').textContent='正在识别图片…';await detect(image,token);}catch(err){$('status').textContent=err.message;}finally{URL.revokeObjectURL(url);e.target.value='';}};
+$('guide').onclick=async()=>{
+ if(!lastFrame)return;stop();const token=epoch,frame=lastFrame;$('guide').disabled=true;$('guidance').textContent='正在生成静止画面的说明…';
+ try{const response=await fetch('/analyze',{method:'POST',headers:{'Content-Type':'image/jpeg'},body:frame});
+ if(!response.ok)throw new Error(`AI 分析失败 (${response.status})`);
+ const data=await response.json();if(token!==epoch)return;
+ $('guidance').textContent=`${data.guidance.status==='ok'?'DeepSeek 场景说明':'AI 说明不可用'}：${data.guidance.text}（静止画面，非实时导航）`;
+ }catch(e){if(token===epoch)$('guidance').textContent=e.message;}finally{if(token===epoch)$('guide').disabled=!lastFrame;}
+};
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});window.addEventListener('pagehide',stop);
 </script></html>

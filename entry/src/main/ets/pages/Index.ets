@@ -8,6 +8,7 @@ import { SpeechManager } from '../utils/SpeechManager';
 import { YoloDetector, DetectedObject } from '../utils/YoloDetector';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { BreathingCircle } from '../ui/components/BreathingCircle';
+import { RemoteVisionClient } from '../utils/RemoteVisionClient';
 import { sensor } from '@kit.SensorServiceKit';
 import { AppColors, PAGE_GRADIENT } from '../ui/AppTheme';
 
@@ -20,6 +21,10 @@ struct Index {
   @State private speechSpeed: string = '标准'
   @State private vibrationEnabled: boolean = true
   @State private voiceHintEnabled: boolean = true
+  @State private useDeepSeek: boolean = false
+  @State private aiServiceUrl: string = ''
+  @State private aiStatus: string = ''
+  private aiGeneration: number = 0;
 
   private xComponentController: XComponentController = new XComponentController();
   private cameraManager: camera.CameraManager | null = null;
@@ -293,7 +298,7 @@ struct Index {
           }
 
           const now = Date.now();
-          if (now - this.lastDetectTime < this.detectInterval) {
+          if (now - this.lastDetectTime < (this.useDeepSeek ? 5000 : this.detectInterval)) {
             nextImage.release();
             return;
           }
@@ -332,6 +337,7 @@ struct Index {
   }
 
   async releaseCamera(): Promise<void> {
+    this.aiGeneration += 1;
     try {
       if (this.imageReceiver) {
         this.imageReceiver.off('imageArrival');
@@ -395,6 +401,20 @@ struct Index {
 
       pixelMap = await imageSource.createPixelMap();
 
+      if (this.useDeepSeek) {
+        this.aiStatus = '正在生成场景说明…';
+        const generation = this.aiGeneration;
+        const analysis = await RemoteVisionClient.analyze(pixelMap, this.aiServiceUrl);
+        if (generation !== this.aiGeneration || !this.useDeepSeek || !this.isPreviewing) return;
+        this.aiStatus = `${analysis.guidance.model}: ${analysis.guidance.text}`;
+        if (analysis.guidance.status === 'ok' && this.voiceHintEnabled) {
+          const speed = this.speechSpeed === '慢' ? 0.8 : (this.speechSpeed === '快' ? 1.2 : 1.0);
+          SpeechManager.getInstance().stop();
+          await SpeechManager.getInstance().speak(analysis.guidance.text, speed);
+        }
+        return;
+      }
+
       const inputData: Float32Array = await this.preprocessImage(pixelMap);
       if (!inputData || inputData.length === 0) {
         console.error('preprocessImage 返回空数据');
@@ -411,6 +431,7 @@ struct Index {
       }
     } catch (err) {
       const e = err as BusinessError;
+      this.aiStatus = this.useDeepSeek ? 'AI 说明不可用，请检查服务地址、网络和服务端模型配置' : '';
       console.error(`识别失败: code=${e.code}, message=${e.message}`);
     } finally {
       if (pixelMap) {
@@ -492,7 +513,7 @@ struct Index {
               .width(10)
               .height(10)
               .backgroundColor(AppColors.sageLight)
-            Text('正在识别中')
+            Text(this.useDeepSeek ? 'YOLO + DeepSeek 场景说明' : '正在识别中')
               .fontSize(15)
               .fontColor(AppColors.white)
               .margin({ left: 8 })
@@ -501,6 +522,15 @@ struct Index {
           .padding({ left: 16, right: 18, top: 9, bottom: 9 })
           .borderRadius(20)
           .margin({ top: 54 })
+
+          if (this.useDeepSeek && this.aiStatus.length > 0) {
+            Text(this.aiStatus)
+              .fontSize(16)
+              .fontColor(AppColors.white)
+              .backgroundColor(AppColors.overlay)
+              .padding(16)
+              .margin({ top: 16, left: 20, right: 20 })
+          }
 
           Blank()
 
@@ -535,6 +565,10 @@ struct Index {
       .width('100%')
       .height('100%')
     }
+    .onHidden(() => {
+      SpeechManager.getInstance().stop();
+      this.releaseCamera();
+    })
     .hideTitleBar(true)
   }
 
@@ -708,6 +742,24 @@ struct Index {
           .borderRadius(24)
           .shadow(AppColors.shadowCard)
           .margin({ top: 32 })
+
+          Column({ space: 12 }) {
+            Text('DeepSeek V4.1 Flash 场景说明')
+              .fontSize(19)
+              .fontColor(AppColors.ink)
+            Text('开启后画面发送到 AI 服务电脑，检测摘要发送给 DeepSeek；约每 5 秒请求一次。仅供场景描述测试。')
+              .fontSize(14)
+              .fontColor(AppColors.stone)
+            TextInput({ text: this.aiServiceUrl, placeholder: 'https://你的AI服务地址:8443' })
+              .onChange((value: string) => { this.aiServiceUrl = value; this.aiGeneration += 1 })
+            Toggle({ type: ToggleType.Switch, isOn: this.useDeepSeek })
+              .onChange((enabled: boolean) => { this.useDeepSeek = enabled; this.aiStatus = ''; this.aiGeneration += 1; SpeechManager.getInstance().stop() })
+          }
+          .width('100%')
+          .padding(22)
+          .backgroundColor(AppColors.card)
+          .borderRadius(24)
+          .margin({ top: 20 })
 
           this.buildEntryCard('说', '使用说明', '了解如何开始识别、退出识别以及使用语音辅助', () => { this.openHelp() })
 
