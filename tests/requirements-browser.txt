@@ -1,0 +1,2 @@
+-r ../mobile_demo/requirements-dev.txt
+playwright>=1.50,<2

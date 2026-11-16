@@ -1,8 +1,16 @@
 # 助盲眼镜（探步 / AI_Vision_for_Blind）
 
-软创参赛项目，面向视觉辅助场景。本说明依据 GitHub 仓库实际文件与运行结果编写，区分原有鸿蒙工程材料和新增的手机浏览器验证程序。
+软创参赛项目，面向视觉辅助场景，现支持 Android / Windows 的跨平台 PWA 入口，并保留鸿蒙原生客户端。本说明依据 GitHub 仓库实际文件与运行结果编写，区分原有鸿蒙工程材料和新增的手机浏览器验证程序。
 
 > 已补齐用户提供的 `AppScope/`、`entry/`、`hvigor/` 与参赛材料。原生源码已可检查，但尚未在 DevEco Studio/鸿蒙真机编译运行。Web 测试程序已接入 DeepSeek V4.1 Flash，并已验证图片检测、模拟摄像头与真实 API 场景说明流程；不能据此证明实际出行避障安全性。
+
+## Android / Windows 入口
+
+目前采用 **可安装 PWA + 共用 Python 推理服务**，不再只依赖鸿蒙原生应用。Android 用 Chrome 安装到主屏幕，Windows 用 Edge/Chrome 安装为独立窗口；没有生成 APK 或 EXE 安装包。提供摄像头选择、图片/拍照上传、DeepSeek 场景说明及浏览器中文语音播报。
+
+Windows 可以在仓库根目录运行 `.\scripts\start-windows.ps1`，自动准备依赖并启动本机服务。手机连接电脑时仍需同一网络与受信任 HTTPS。安装只缓存界面，Android 检测仍需连接服务，DeepSeek 仍需联网。
+
+完整的 [跨平台启动、安装与验证说明](./docs/CROSS_PLATFORM.md) 包含功能表、Windows/Android 步骤、离线边界与实体设备待验收项。
 
 ## 当前使用什么模型？
 
@@ -22,7 +30,7 @@ COCO 通用检测不能覆盖全部路面风险，如坑洞、台阶、玻璃和
 
 原始工程配置：HarmonyOS、Hvigor（TypeScript 构建脚本）、OHPM、Hypium/Hamock；`build-profile.json5` 声明目标 SDK `26.0.0`、兼容版本 `6.1.1(24)`。这些是配置声明，不代表已经成功构建。业务使用 ArkTS/ArkUI、Stage 模型、CameraKit、ImageKit、MindSporeLiteKit、SensorServiceKit 和 CoreSpeechKit。
 
-新增验证程序：Python 3.12、FastAPI、Uvicorn、ONNX Runtime CPU、NumPy、Pillow；HTTP 客户端为 httpx，环境配置使用 python-dotenv；前端为 HTML/CSS/JavaScript，使用 `getUserMedia`、Canvas、Fetch，无前端构建步骤。只有生成 AI 场景说明时调用 DeepSeek 云 API。
+跨平台服务与 PWA：Python 3.12、FastAPI、Uvicorn、ONNX Runtime CPU、NumPy、Pillow；HTTP 客户端为 httpx，环境配置使用 python-dotenv；前端为 HTML/CSS/JavaScript，使用 `getUserMedia`、Canvas、Fetch，无前端构建步骤；通过 Web App Manifest 和 Service Worker 提供 PWA 安装与离线界面。只有生成 AI 场景说明时调用 DeepSeek 云 API。
 
 ```text
 .
@@ -35,7 +43,9 @@ COCO 通用检测不能覆盖全部路面风险，如坑洞、台阶、玻璃和
 │   ├── src/test/           # 模板本地测试
 │   └── src/ohosTest/       # 模板设备测试
 ├── hvigor/hvigor-config.json5
-├── docs/                    # 参赛作品 ZIP 与原生审查说明
+├── docs/                    # 参赛 ZIP、原生检查、跨平台说明
+├── scripts/start-windows.ps1 # Windows 本机/局域网启动
+├── .github/workflows/       # Linux/Windows 自动验证配置
 ├── build-profile.json5       # 原生工程构建配置，引用 ./entry
 ├── oh-package*.json5         # OHPM 依赖与锁文件
 ├── hvigorfile.ts             # 鸿蒙构建入口
@@ -47,7 +57,7 @@ COCO 通用检测不能覆盖全部路面风险，如坑洞、台阶、玻璃和
 │   ├── guidance.py           # 服务端 DeepSeek 请求、摘要与错误处理
 │   ├── requirements.txt
 │   ├── requirements-dev.txt
-│   └── static/index.html     # 后置相机、拍照上传、结果绘制、停止与错误提示
+│   └── static/              # PWA 页面、JS/CSS、manifest、Service Worker、图标
 ├── .env.example              # 不含密钥的配置模板
 └── tests/                    # 模型/接口/DeepSeek 错误处理测试
 ```
@@ -154,11 +164,11 @@ mkcert -cert-file certs/phone.pem -key-file certs/phone-key.pem localhost 127.0.
 Web 首次验证日期：2026-11-17（北京时间）；基于原仓库提交 `22916ec` 加新增 Web 程序，在 Linux、Python 3.12.14、CPU 下运行。后续补齐四个 ZIP 的原生工程；当前版本另增原生 HTTPS AI 接入、网络权限与设置。参赛归档保持原样。
 
 - ONNX checker 检查通过；ONNX Runtime 成功加载模型，接口形状和 COCO 类别来自模型本身元数据。
-- 当前 11 项自动测试通过：原有 5 项、无密钥分析接口、摘要与模型请求参数、上游错误、超时、空回复、缺密钥不发请求；测试使用模拟 HTTP，不产生 API 费用。
+- 当前 13 项自动测试通过：原有模型/接口/DeepSeek 测试，加 PWA 清单/scope/图标/资源和私密配置不被静态目录暴露；测试使用模拟 HTTP，不产生 API 费用。
 - 使用 [Ultralytics 公共 bus.jpg](https://ultralytics.com/images/bus.jpg) 实际调用接口，检测到 1 辆公交车和 4 个人；公交车置信度约 0.836。3 次 HTTP 请求约 137–207 ms（含本机客户端开销），不能作为手机帧率或准确率评估。
 - Chromium 浏览器以 390×844 视口验证上传、检测列表、模拟摄像头采集、停止释放与页面宽度；无页面脚本错误。模拟摄像头不代表实体手机相机已验证。
 - 真实 DeepSeek `/models` 验证成功；真实 `/analyze` 用公交车图片得到 5 个检测结果和中文场景说明，单次约 1601 ms（含 YOLO 与网络开销，不代表稳定延迟或准确率）。没有向 DeepSeek 发送图片。
-- 手机视口 Chromium 已验证相机启停、图片上传、点击生成说明及真实 DeepSeek 返回；不等于实体手机或原生端通过。
+- DeepSeek 接入时，手机视口 Chromium 已验证真实说明返回；本次跨平台改动另用 Android/Windows 尺寸 Chromium 测试安装条件、相机选择/断开、上传、语音接口、离线界面与不缓存 API。跨平台自动测试模拟 AI 与语音，不等于实体设备或原生端通过。
 - 补齐后已静态检查原生入口、权限、模型资源与源码调用链；MSL2 文件头存在。原生 App 未运行：当前环境未配置 DevEco Studio/匹配鸿蒙 SDK，签名与设备仍需本地配置；不能将 ONNX 测试通过当作 `.ms` 推理已通过。
 
 复现自动测试：

@@ -10,6 +10,7 @@ import numpy as np
 import onnxruntime as ort
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
 
@@ -100,12 +101,25 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title='探步 · YOLO + DeepSeek 手机测试', lifespan=lifespan)
+app = FastAPI(title='探步 · 跨平台视觉助手', lifespan=lifespan)
+STATIC = Path(__file__).parent / 'static'
+app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 
 @app.get('/')
 def index():
-    return FileResponse(Path(__file__).parent / 'static/index.html')
+    return FileResponse(STATIC / 'index.html', headers={'Cache-Control': 'no-cache'})
+
+
+@app.get('/manifest.webmanifest')
+def manifest():
+    return FileResponse(STATIC / 'manifest.webmanifest', media_type='application/manifest+json')
+
+
+@app.get('/service-worker.js')
+def service_worker():
+    return FileResponse(STATIC / 'service-worker.js', media_type='application/javascript',
+                        headers={'Cache-Control': 'no-cache', 'Service-Worker-Allowed': '/'})
 
 
 @app.get('/health')

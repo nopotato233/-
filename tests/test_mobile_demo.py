@@ -55,6 +55,26 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json()['guidance']['status'], 'unavailable')
         self.assertIn('detections', response.json())
 
+    def test_pwa_assets_and_scope(self):
+        response = self.client.get('/manifest.webmanifest')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('application/manifest+json', response.headers['content-type'])
+        manifest = response.json()
+        self.assertEqual(manifest['display'], 'standalone')
+        self.assertEqual(manifest['scope'], '/')
+        for icon in manifest['icons']:
+            with Image.open(io.BytesIO(self.client.get(icon['src']).content)) as image:
+                self.assertEqual(f'{image.width}x{image.height}', icon['sizes'])
+        worker = self.client.get('/service-worker.js')
+        self.assertEqual(worker.headers['service-worker-allowed'], '/')
+        self.assertIn('no-cache', worker.headers['cache-control'])
+        for path in ['/static/app.css', '/static/app.js']:
+            self.assertEqual(self.client.get(path).status_code, 200)
+
+    def test_static_mount_does_not_expose_credentials(self):
+        self.assertEqual(self.client.get('/.env').status_code, 404)
+        self.assertEqual(self.client.get('/static/.env').status_code, 404)
+
     def test_bad_image(self):
         self.assertEqual(self.client.post('/detect', content=b'invalid').status_code, 400)
 
