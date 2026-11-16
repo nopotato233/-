@@ -2,31 +2,40 @@
 
 软创参赛项目，面向视觉辅助场景。本说明依据 GitHub 仓库实际文件与运行结果编写，区分原有鸿蒙工程材料和新增的手机浏览器验证程序。
 
-> 当前 GitHub 中的原生鸿蒙工程不完整，不能据此复现原生 App。新增 Web 测试程序已运行，可验证图片目标检测与浏览器摄像头采集流程；不能据此证明实际出行避障安全性。
+> 已补齐用户提供的 `AppScope/`、`entry/`、`hvigor/` 与参赛材料。原生源码已可检查，但尚未在 DevEco Studio/鸿蒙真机编译运行。新增 Web 测试程序已运行，可验证图片目标检测与浏览器摄像头采集流程；不能据此证明实际出行避障安全性。
 
 ## 当前使用什么模型？
 
 | 项目 | 检查结果与依据 |
 | --- | --- |
-| 大语言模型（LLM） | 当前仓库未发现 LLM 权重、调用代码、API 配置或提示词。不能认定接入了任何大语言模型。 |
+| 大语言模型（LLM） | 检查补齐后的 ArkTS 源码仍未发现 LLM 权重、调用代码、API 配置或提示词。当前语音内容来自规则拼接与 TTS，不是大模型生成。 |
 | 图像识别模型 | **Ultralytics YOLOv8n**，任务为目标检测，不是场景对话或图像描述。ONNX 元数据标明 `trained on coco.yaml`，包含 80 个类别，如 person、bus、car。 |
-| 模型文件 | `yolov8n.onnx`（12,824,061 字节）、`yolov8n.pt`（6,534,387 字节）。Web 演示实际加载 ONNX；本次没有执行 PT 文件，也没有验证两者逐层权重一致。 |
+| 模型文件 | 原生加载 `entry/src/main/resources/rawfile/yolov8n.ms`（12,843,304 字节，MSL2 文件头）；Web 加载 `yolov8n.onnx`（12,824,061 字节）。另有 `yolov8n.pt`（6,534,387 字节），本次未执行 PT，也未验证三种格式权重逐层一致。 |
 | ONNX 接口 | 输入 `images: float32[1,3,640,640]`，输出 `output0: float32[1,84,8400]`；前 4 通道是中心坐标/宽高，后 80 通道是类别分数。 |
 | 导出信息 | 模型元数据：Ultralytics `8.4.175`、opset 11、`nms: None`。因此 Web 程序执行 letterbox、归一化、逐类 NMS 和坐标还原。 |
-| MindSpore Lite | 原 README 声称使用，但现有仓库缺少运行代码和 `.ms` 模型，无法验证原生端是否实际使用。新增 Web 程序使用 ONNX Runtime CPU。 |
-| 避障、陀螺仪、语音 | 原 README 声称动态避障与防抖，但当前未见对应源码；Web 演示只输出类别、置信度、检测框，不做测距、路径规划或语音导航。 |
+| MindSpore Lite | `YoloDetector.ets` 读取 `yolov8n.ms`，调用 `loadModelFromBuffer` 与 `predict`；配置 CPU、4 线程、FP32。不是 NPU 推理；`inspectNNRT()` 仅枚举设备。Web 使用 ONNX Runtime CPU。 |
+| 避障、陀螺仪、语音 | `Index.ets` 基于框面积、位置、面积变化和类别进行风险排序，订阅陀螺仪判断手机稳定；`SpeechManager.ets` 使用 CoreSpeechKit TTS 播报。属于规则式提醒，尚未证明可靠避障。Web 仅输出检测结果，不复用原生语音与传感器。 |
 
 COCO 通用检测不能覆盖全部路面风险，如坑洞、台阶、玻璃和细小障碍。识别框大小不能直接当作距离。原 README 中关于应用市场上架的说法，本次未独立核验。
 
 ## 技术与结构
 
-原始工程配置：HarmonyOS、Hvigor（TypeScript 构建脚本）、OHPM、Hypium/Hamock；`build-profile.json5` 声明目标 SDK `26.0.0`、兼容版本 `6.1.1(24)`。这些是配置声明，不代表已经成功构建。由于缺少 `.ets` 文件，当前不能检查实际 ArkTS 业务实现。
+原始工程配置：HarmonyOS、Hvigor（TypeScript 构建脚本）、OHPM、Hypium/Hamock；`build-profile.json5` 声明目标 SDK `26.0.0`、兼容版本 `6.1.1(24)`。这些是配置声明，不代表已经成功构建。业务使用 ArkTS/ArkUI、Stage 模型、CameraKit、ImageKit、MindSporeLiteKit、SensorServiceKit 和 CoreSpeechKit。
 
 新增验证程序：Python 3.12、FastAPI、Uvicorn、ONNX Runtime CPU、NumPy、Pillow；前端为 HTML/CSS/JavaScript，使用 `getUserMedia`、Canvas、Fetch，无前端构建步骤，无云模型 API。
 
 ```text
 .
 ├── README.md
+├── AppScope/                # 应用标识、图标、名称
+├── entry/                   # 原生 ArkTS 应用模块
+│   ├── src/main/ets/        # 页面、Ability、检测器、TTS、UI 组件
+│   ├── src/main/module.json5 # 相机/陀螺仪权限及入口
+│   ├── src/main/resources/rawfile/yolov8n.ms
+│   ├── src/test/           # 模板本地测试
+│   └── src/ohosTest/       # 模板设备测试
+├── hvigor/hvigor-config.json5
+├── docs/                    # 参赛作品 ZIP 与原生审查说明
 ├── build-profile.json5       # 原生工程构建配置，引用 ./entry
 ├── oh-package*.json5         # OHPM 依赖与锁文件
 ├── hvigorfile.ts             # 鸿蒙构建入口
@@ -45,11 +54,20 @@ COCO 通用检测不能覆盖全部路面风险，如坑洞、台阶、玻璃和
 
 ## 结构是否完善？
 
-**原生工程尚不完整。** 当前未提供 `entry/`（页面、Ability、相机与模型调用、权限声明、模块配置）、`AppScope/`、完整 Hvigor 配置/启动脚本及签名配置。`signingConfigs` 为空，产品却引用 default 签名；旧 README 链接的 `docs/探步_AI_Vision_for_Blind_参赛作品.zip` 也不存在。应先补齐原生源码与资源，再在匹配 SDK 的 DevEco Studio 中编译并真机验证。
+**核心原生模块已补齐，工程仍需验证和完善。** 相机、检测、TTS、陀螺仪、界面资源、权限声明及 MindSpore 模型均有源码/文件。参赛材料已恢复：[下载作品 ZIP](./docs/探步_AI_Vision_for_Blind_参赛作品.zip)。但仓库仍缺少 `hvigorw`/`hvigorw.bat` 启动脚本；产品引用 default 签名而 `signingConfigs` 为空，需在本机 IDE 中配置签名。不要提交个人签名私钥或本地 SDK 路径。
 
-**Web 演示形成了最小可运行闭环。** 有相机/图片输入、真实模型推理、错误处理、请求体大小限制、结果绘制与自动测试，但还缺少真实手机兼容性矩阵、场景数据集评测、距离/危险等级算法、离线端侧部署和原生传感器集成。当前没有账号鉴权，仅用于可信局域网内的个人测试，不应直接映射到公网。
+**原生算法仍有明显待验证点。** 当前 NMS 会跨类别互相抑制；按类别名而非目标 ID 保存历史，可能把不同的人当作同一个目标；面积变化判定要求间隔小于 800 ms，而采样间隔设为 800 ms，快速接近分支可能很少触发；语速、振动、语音开关还没有接入检测播报调用。原生预处理为拉伸到 640×640、NHWC，而 Web 为 letterbox、NCHW，两条流程不能直接等同。详见 [原生工程检查与真机测试清单](./docs/NATIVE_REVIEW.md)。
 
-若补传本地完整工程，需重新检查其中是否存在 LLM、MindSpore Lite、传感器或语音实现；本说明对“缺少代码”的判断仅针对当前 GitHub 快照。
+**Web 演示形成了最小可运行闭环。** 有相机/图片输入、真实模型推理、错误处理、请求体大小限制、结果绘制与自动测试，但不能替代原生 `.ms` 模型真机评测。当前没有账号鉴权，仅用于可信局域网内的个人测试，不应直接映射到公网。
+
+## 原生鸿蒙手机测试
+
+1. 在安装匹配 HarmonyOS SDK 的 DevEco Studio 中打开仓库根目录，执行项目同步与 OHPM 依赖安装。按 `build-profile.json5` 核对 SDK，不要仅为消除错误随意降级 API。
+2. 在 Project Structure / Signing Configs 中配置自己的调试签名，关联 default 产品；使用支持所需 API 的鸿蒙实体手机。具体 SDK 与机型兼容性需以 IDE 和设备结果为准。
+3. 构建 entry 模块并运行，授权摄像头，在实际预览页检查相机画面；查看日志中的模型加载成功、推理输出与 TTS 初始化状态。
+4. 依照 [检查清单](./docs/NATIVE_REVIEW.md) 测试拒绝授权、前后台切换、重复进入预览、多人同类目标、传感器和语音设置。Android/iPhone 不能直接运行该鸿蒙工程，可先使用下面的浏览器测试程序。
+
+当前云环境没有 DevEco Studio、Hvigor/OHPM 或鸿蒙 SDK，尚未构建 HAP、运行 Hypium 或连接鸿蒙手机。现有 `src/test` 与 `src/ohosTest` 主要是模板字符串断言，不能证明识别/相机功能通过。
 
 ## 在电脑启动 Web 测试
 
@@ -104,17 +122,17 @@ mkcert -cert-file certs/phone.pem -key-file certs/phone-key.pem localhost 127.0.
 
 然后允许专用网络端口 8443，手机访问 `https://192.168.1.10:8443`，确认无证书警告，点击“开启后置摄像头”，允许权限。默认请求后置摄像头，最终由浏览器与硬件决定。IP 改变时要重新签发证书。也可使用已受手机信任的 HTTPS 反向代理，但应控制访问范围。
 
-暂未在实体 Android/iPhone/鸿蒙手机上测试，也未验证该证书流程在你的设备上是否已配置成功。原生 HarmonyOS 相机测试需补齐原生工程后另行执行。
+暂未在实体 Android/iPhone/鸿蒙手机上测试，也未验证该证书流程在你的设备上是否已配置成功。原生 HarmonyOS 相机测试需在本地 DevEco Studio 和鸿蒙真机上另行执行。
 
 ## 本次运行验证
 
-验证日期：2026-11-17（北京时间）；基于原仓库提交 `22916ec` 加本次新增 Web 程序，在 Linux、Python 3.12.14、CPU 下运行。
+Web 首次验证日期：2026-11-17（北京时间）；基于原仓库提交 `22916ec` 加新增 Web 程序，在 Linux、Python 3.12.14、CPU 下运行。后续从用户上传的四个 ZIP 补齐原生工程，源码与归档文件保持原样；新增说明单独记录检查发现。
 
 - ONNX checker 检查通过；ONNX Runtime 成功加载模型，接口形状和 COCO 类别来自模型本身元数据。
 - 5 项自动测试通过：letterbox/坐标还原、逐类 NMS、真实模型空白图推理与页面/健康接口、无效图片、超限请求。
 - 使用 [Ultralytics 公共 bus.jpg](https://ultralytics.com/images/bus.jpg) 实际调用接口，检测到 1 辆公交车和 4 个人；公交车置信度约 0.836。3 次 HTTP 请求约 137–207 ms（含本机客户端开销），不能作为手机帧率或准确率评估。
 - Chromium 浏览器以 390×844 视口验证上传、检测列表、模拟摄像头采集、停止释放与页面宽度；无页面脚本错误。模拟摄像头不代表实体手机相机已验证。
-- 原生鸿蒙 App 未运行：缺少源码、资源与完整构建配置，当前环境也未配置 DevEco Studio/匹配鸿蒙 SDK。
+- 补齐后已静态检查原生入口、权限、模型资源与源码调用链；MSL2 文件头存在。原生 App 未运行：当前环境未配置 DevEco Studio/匹配鸿蒙 SDK，签名与设备仍需本地配置；不能将 ONNX 测试通过当作 `.ms` 推理已通过。
 
 复现自动测试：
 
