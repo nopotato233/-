@@ -10,3 +10,7 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+.venv/
+__pycache__/
+*.pyc
+certs/
